@@ -135,9 +135,7 @@ class ImmobiliareCrawler:
 
     def parse_page(self, url):
 
-        # # random sleep time
-        # if self.random_sleep_time is not None:
-        #     time.sleep(np.random.uniform(self.random_sleep_time[0], self.random_sleep_time[1]))
+        
 
         # get list of property data from url
         resp = requests.get(url, headers=np.random.choice(self.headers_list))
