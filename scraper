@@ -1,0 +1,212 @@
+import requests
+import bs4 as bs
+import numpy as np
+import pandas as pd
+from urllib.parse import parse_qs
+from collections import OrderedDict
+def get_fake_headers ():
+
+    ''' List of fake user-agent headers for scraping
+    Tutorial: https://www.scrapehero.com/how-to-fake-and-rotate-user-agents-using-python-3
+    List user-agents: https://developers.whatismybrowser.com/useragents/explore/operating_system_name/windows/
+    '''
+
+    headers_list = [
+
+        # Firefox 77 Mac
+        {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:77.0) Gecko/20100101 Firefox/77.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,/;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Referer": "https://www.google.com/",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        },
+
+        # Firefox 77 Windows
+        {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:77.0) Gecko/20100101 Firefox/77.0",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,/;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.google.com/",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        },
+
+        # Chrome 83 Mac
+        {
+            "Connection": "keep-alive",
+            "DNT": "1",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,/;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Dest": "document",
+            "Referer": "https://www.google.com/",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-GB,en-US;q=0.9,en;q=0.8"
+        },
+
+        # Chrome 83 Windows
+        {
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/83.0.4103.97 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,/;q=0.8,application/signed-exchange;v=b3;q=0.9",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-User": "?1",
+            "Sec-Fetch-Dest": "document",
+            "Referer": "https://www.google.com/",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": "en-US,en;q=0.9"
+        }
+    ]
+
+    # Create ORDERED dict from Headers above
+    ordered_headers_list = []
+    for headers in headers_list:
+        h = OrderedDict()
+        for header, value in headers.items():
+            h[header] = value
+        ordered_headers_list.append(h)
+
+
+    return ordered_headers_list
+
+
+# class for data mining
+class ImmobiliareCrawler:
+
+    def __init__(
+            self,
+            url=None,
+            random_sleep_time=(1, 2),
+    ):
+
+        # Get the search params
+        self.url = url + '&pag=1'
+        self.random_sleep_time = random_sleep_time
+        self.headers_list = get_fake_headers()
+        self.property_data = None
+        self.property_data_df = None
+
+    @staticmethod
+    def parse_property_data(p):
+
+        price_li = p.find('li', {'class': 'nd-list__item in-feat__item in-feat__item--main in-realEstateListCard__features--main'})
+        if price_li is None:
+            print('!!!!! No price available')
+            return None
+
+        p_data = dict()
+
+
+        # Basic info
+        p_data['title'] = p.find('a', {'class': 'in-card__title'}).get('title')
+        p_data['url'] = p.find('a', {'class': 'in-card__title'}).get('href')
+        p_data['description'] = p.find('p', {'class': 'in-realEstateListCard__descriptionShort'}).text
+        p_data['space'] = p.find('li', {'aria-label': 'superficie'}).text.replace('m²','')
+
+        # Prices
+        price = p.find('li', {'class': 'nd-list__item in-feat__item in-feat__item--main in-realEstateListCard__features--main'}).text
+        price = price if '%' not in price else price.split('€')[1]  # handle price changes
+        price = price.replace('€', '').replace('.', '').replace(' ', '').replace('\n', '').replace('\xa0', '').replace('da', '')
+        p_data['price'] = int(price)
+
+
+
+
+
+        #Skip if no floor area data present
+        if p_data.get('space') is None:
+            return None
+
+
+
+        # Compute extra metrics
+        p_data['price/m2'] = round(int(p_data['price']) / int (p_data['space']),2)
+
+        return p_data
+
+    def parse_page(self, url):
+
+        # # random sleep time
+        # if self.random_sleep_time is not None:
+        #     time.sleep(np.random.uniform(self.random_sleep_time[0], self.random_sleep_time[1]))
+
+        # get list of property data from url
+        resp = requests.get(url, headers=np.random.choice(self.headers_list))
+        soup = bs.BeautifulSoup(resp.text, 'html.parser')
+        if soup.find('ul', {'class': 'nd-list in-realEstateResults'}) is None:
+            return None
+
+
+        # filter properties from advertisements
+        property_list = soup.find('ul', {'class': 'nd-list in-realEstateResults'}).find_all('li')
+        property_list = [p for p in property_list if p.get('id') is not None]
+
+
+
+        # get property data
+        property_data = []
+        for i, p in enumerate(property_list):
+
+            try:
+                property_data.append(self.parse_property_data(p))
+                print(i)
+                print(property_data[-1])
+
+            except Exception as e:
+                print('!!!!!', e)
+
+        return property_data
+
+    def get_all_property_data(self):
+
+        url = self.url
+        property_data = []
+        while True:
+
+            url_property_data = self.parse_page(url)
+
+            if url_property_data is None:
+                break
+
+            property_data += url_property_data
+
+            current_page = int(parse_qs(url).get('pag')[0])
+            next_page = current_page + 1
+            url = url.replace(f'&pag={current_page}', f'&pag={next_page}')
+
+        self.property_data = property_data
+        df = pd.DataFrame([p for p in self.property_data if p is not None])
+        df = df.sort_values('prezzo/m2')
+        self.property_data_df = df
+
+
+
+    def run_pipeline(self):
+
+        ''' Run the entire data mining pipeline
+        '''
+
+        self.get_all_property_data()
+        return self.property_data_df
+
+
+if __name__ == '__main__':
+
+
+    self = ImmobiliareCrawler(
+        url='https://www.immobiliare.it/vendita-case/roma/in-via-del-corso/?criterio=rilevanza&gclid=CjwKCAjwgr6TBhAGEiwA3aVuIeXu20WqrcxyVNcATx7MT0dEFWzPl3ysRWip8c7QkwAkXdHeGfji9BoC8A4QAvD_BwE',
+    )
+
+    df = self.run_pipeline()
+    file_name = "Immobiliare_Crawler.xlsx"
+    df.to_excel(file_name)
+
